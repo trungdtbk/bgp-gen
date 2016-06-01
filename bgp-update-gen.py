@@ -1,5 +1,6 @@
 #!/usr/bin/env python
 import sys
+import random
 import time
 import dpkt
 from socket import inet_ntoa as inet_ntoa
@@ -41,10 +42,17 @@ msg_source_ops = [
     cfg.StrOpt('mrt',
                help='bgp update file in mrt format'),
     cfg.StrOpt('announce_prefixes',
-               help='announce prefixes e.g. \"1.0.0.0/24, 2.0.0.0/24\"'),
+               help='announce prefixes e.g. \"1.0.0.0/24 2.0.0.0/24\"'),
     cfg.StrOpt('withdraw_prefixes',
-               help='withdraw prefixes e.g. \"1.0.0.0/24, 2.0.0.0/24\"')
+               help='withdraw prefixes e.g. \"1.0.0.0/24 2.0.0.0/24\"'),
 ]
+
+rand_ops = [
+        cfg.StrOpt('m', help='number of prefixes per update'),
+        cfg.StrOpt('n', help='total number of updates'),
+        cfg.StrOpt('d', help='delay between updates'),
+        ]
+CONF.register_cli_opts(rand_ops, group='rand')
 
 CONF.register_cli_opts(msg_source_ops, group='message')
 
@@ -68,7 +76,7 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
     print filename
     bgpdump = BGPDump(filename)
     mrt_m = bgp_h = bgp_m = None
-    delay = 0
+    delay = 0.01
     prev_ts = 0
     while True:
         try:
@@ -137,18 +145,43 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
 
                 update['attr'] = attr
 
-                time.sleep(delay+1)
+                time.sleep(delay + 0.01)
 
                 yagent.send_update(peerip, update)
         except Exception as e:
             #print e
             break
 
+def rand_announce(yagent, peerip, delay, n, total):
+    """
+        yagent:
+    """
+    base = "%d.%d.%d.0/24"
+    rand = random.Random()
+    for i in range(total):
+        update = {}
+        attr = {}
+        attr['1'] = 0 # origin
+        attr['2'] = [[2, [2000,1000,100]]] # aspath
+        attr['3'] = '172.0.0.1'
+        update['attr'] = attr
+        prefixes = []
+        for j in range(n):
+            x = rand.randint(1, 220)
+            y = rand.randint(0, 255)
+            z = rand.randint(0, 255)
+            net = base % (x, y, z)
+            prefixes.append(net)
+        update['nlri'] = prefixes
+        yagent.send_update(peerip, update)
+        time.sleep(delay)
 
 if __name__ == '__main__':
     CONF(args=sys.argv[1:])
     yagent = YabgpAgent(CONF.rest.host, CONF.rest.port,
                         CONF.rest.user, CONF.rest.passwd)
+
+    peerip = CONF.peerip
 
     if CONF.message.mrt:
         send_updates_from_file(yagent, CONF.peerip,
@@ -157,10 +190,20 @@ if __name__ == '__main__':
     if CONF.message.announce_prefixes:
         prefixes = CONF.message.announce_prefixes
         yagent.announce(peer_ip = CONF.peerip,
-                    prefixes = prefixes.split(','),
-                    as_path = [123], next_hop = CONF.attribute.nexthop)
+                    prefixes = [p for p in prefixes.split(' ') if p],
+                    as_path = [4000,100], next_hop = CONF.attribute.nexthop)
 
     if CONF.message.withdraw_prefixes:
         prefixes = CONF.message.withdraw_prefixes
         yagent.withdraw(peer_ip = CONF.peerip,
-                    prefixes = prefixes.split(','))
+                    prefixes = [p for p in prefixes.split(' ') if p])
+    rand_d = CONF.rand.d
+    rand_m = CONF.rand.m
+    rand_n = CONF.rand.n
+    if rand_d and rand_m and rand_n:
+        rand_d = float(rand_d)
+        rand_m = int(rand_m)
+        rand_n = int(rand_n)
+        print 'Generate random announcement with %d prefixes/update, %d update \
+                and %f (s) delay between updates' % (rand_m, rand_n, rand_d)
+        rand_announce(yagent, peerip, rand_d, rand_m, rand_n)
