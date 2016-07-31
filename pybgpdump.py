@@ -57,7 +57,6 @@ class BGPDump:
 
             if bgp_h.family not in SUPPORTED_AFIS:
                 continue
-
             bgp_m = dpkt.bgp.BGP(bgp_h.data)
             if bgp_m.type not in SUPPORTED_TYPES:
                 continue
