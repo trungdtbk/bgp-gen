@@ -78,6 +78,8 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
     delay = 0.01
     prev_ts = 0
     count = 0
+    nexthop_base = "10.0.0.%d"
+    rand = random.Random()
     while True:
         try:
             (mrt_h, bgp_h, bgp_m) = bgpdump.next()
@@ -91,7 +93,8 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
                     prefix = "%s/%d" % (inet_ntoa(an.prefix), an.len)
                     an_prefixes.append(prefix)
 
-                update['nlri'] = an_prefixes
+                if an_prefixes:
+                    update['nlri'] = an_prefixes
 
                 wd_prefixes = []
                 for wd in bgp_m.update.withdrawn:
@@ -137,7 +140,7 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
                         #TODO: handle mp unreach message
                         pass
 
-                attr['3'] = next_hop
+                attr['3'] = nexthop_base % rand.randint(1,4)
                 update['attr'] = attr
                 yagent.send_update(peerip, update)
                 if prev_ts == 0:
@@ -146,7 +149,7 @@ def send_updates_from_file(yagent, peerip, next_hop, filename):
                     delay = mrt_h.ts - prev_ts
                     print count, delay, mrt_h.ts
                 prev_ts = mrt_h.ts
-                time.sleep(delay)
+                time.sleep(delay+0.1)
         except Exception as e:
             print e
 
@@ -173,19 +176,27 @@ def rand_announce(yagent, peerip, burst_delays, burst_updates, max_prefixes, tot
     burst_update_min, burst_update_max = burst_updates
     base = "%d.%d.%d.0/24" # base prefix
     rand = random.Random()
+    prefixes = None
+    nexthop = "10.0.0.%d"
     for i in range(total):
         burst_updates = rand.randint(burst_delay_min, burst_delay_max)
         for l in range(burst_updates):
             update = {}
-            update['attr'] = attr
-            prefixes = []
-            for j in range(rand.randint(1, max_prefixes)):
-                x = rand.randint(1, 220)
-                y = rand.randint(0, 255)
-                z = rand.randint(0, 255)
-                prefixes.append(base % (x, y, z))
-            update['nlri'] = prefixes
-            yagent.send_update(peerip, update)
+            if prefixes is not None:
+                update['withdraw'] = prefixes
+            if bool(rand.getrandbits(1)):
+                prefixes = []
+                for j in range(rand.randint(1, max_prefixes)):
+                    x = rand.randint(1, 220)
+                    y = rand.randint(0, 255)
+                    z = rand.randint(0, 255)
+                    prefixes.append(base % (x, y, z))
+                update['nlri'] = prefixes
+                update['withdraw'] = []
+                attr['3'] = nexthop % rand.randint(1,4)
+                update['attr'] = attr
+            if update:
+                yagent.send_update(peerip, update)
             time.sleep(0)
         time.sleep(rand.randint(burst_update_min, burst_update_max))
 
@@ -220,7 +231,8 @@ if __name__ == '__main__':
         rand_n = int(rand_n)
         print 'Generate announcement randomly with %d prefixes/update, %d update \
                 ' % (rand_m, rand_n)
-        attr = {'1': 0, '2': [[2,[2000,1000,100]]], '3': '172.0.0.1'}
+        nexthop = CONF.attribute.nexthop if CONF.attribute.nexthop else '10.0.0.1'
+        attr = {'1': 0, '2': [[2,[2000,1000,100]]], '3': nexthop}
         burst_delays = (1,10)
         burst_updates = (5,10)
         rand_announce(yagent, peerip, burst_delays=burst_delays,attr=attr,

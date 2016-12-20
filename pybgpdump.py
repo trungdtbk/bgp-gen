@@ -34,33 +34,38 @@ class BGPDump:
         return self
 
     def next(self):
+        mrt_h = bgp_h = bgp_m = None
         while True:
-            s = self.f.read(MRT_HEADER_LEN)
-            if len(s) < MRT_HEADER_LEN:
-                print "header len too small"
-                self.close()
+            try:
+                s = self.f.read(MRT_HEADER_LEN)
+                if len(s) < MRT_HEADER_LEN:
+                    self.close()
+                    break
 
-            mrt_h = dpkt.mrt.MRTHeader(s)
-            s = self.f.read(mrt_h.len)
-            if len(s) < mrt_h.len:
-                self.close()
+                mrt_h = dpkt.mrt.MRTHeader(s)
+                s = self.f.read(mrt_h.len)
+                if len(s) < mrt_h.len:
+                    self.close()
+                    break
 
-            if mrt_h.type != dpkt.mrt.BGP4MP:
-                continue
+                if mrt_h.type != dpkt.mrt.BGP4MP:
+                    continue
 
-            if mrt_h.subtype == dpkt.mrt.BGP4MP_MESSAGE:
-                bgp_h = dpkt.mrt.BGP4MPMessage(s)
-            elif mrt_h.subtype == dpkt.mrt.BGP4MP_MESSAGE_32BIT_AS:
-                bgp_h = dpkt.mrt.BGP4MPMessage_32(s)
-            else:
-                continue
+                if mrt_h.subtype == dpkt.mrt.BGP4MP_MESSAGE:
+                    bgp_h = dpkt.mrt.BGP4MPMessage(s)
+                elif mrt_h.subtype == dpkt.mrt.BGP4MP_MESSAGE_32BIT_AS:
+                    bgp_h = dpkt.mrt.BGP4MPMessage_32(s)
+                else:
+                    continue
 
-            if bgp_h.family not in SUPPORTED_AFIS:
-                continue
-            bgp_m = dpkt.bgp.BGP(bgp_h.data)
-            if bgp_m.type not in SUPPORTED_TYPES:
-                continue
-            if bgp_m.marker != '\xff' * 16:
-                continue
-            break
+                if bgp_h.family not in SUPPORTED_AFIS:
+                    continue
+                bgp_m = dpkt.bgp.BGP(bgp_h.data)
+                if bgp_m.type not in SUPPORTED_TYPES:
+                    continue
+                if bgp_m.marker != '\xff' * 16:
+                    continue
+                break
+            except:
+                pass
         return (mrt_h, bgp_h, bgp_m)
