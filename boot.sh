@@ -29,4 +29,5 @@ cd /yabgp/bin
     --bgp-remote_port $BGP_PEER_PORT --rest-bind_host 0.0.0.0 \
     --rest-bind_port 8080 &
 cd /bgp-update-gen/src
-./bgp-update-gen.py --agent=yabgp
+./bgp-update-gen.py --agent=yabgp &
+bash

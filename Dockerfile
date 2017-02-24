@@ -27,6 +27,9 @@ RUN \
     && python setup.py install 
 
 COPY ./ /bgp-update-gen/
+RUN \
+    cd /bgp-update-gen \
+    && pip install -r requirements.txt
 
 VOLUME ["/var/log/bgp-gen/"]
 CMD ["/bgp-update-gen/boot.sh"]

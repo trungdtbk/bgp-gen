@@ -10,7 +10,6 @@ import traceback
 import ipaddr
 from socket import inet_ntoa as inet_ntoa
 from pybgpdump import BGPDump
-from yabgpagent import YabgpAgent
 import requests
 from requests.auth import HTTPBasicAuth
 import logging
@@ -170,6 +169,17 @@ class BGPUpdateGenerator(object):
             self.mode, self.bgp_agent, self.srv_addr, self.mrt_file,
             self.max_prefix_per_update, self.update_count,
             self.update_per_sec, self.nexthop_range)
+        self._peers = None
+        self.logger.info('Waiting for BGP session established')
+        while self._peers is None:
+            try:
+                self._peers = self.bgpagent.get_peers()
+                time.sleep(5)
+            except KeyboardInterrupt:
+                return "Stopped by user"
+            except:
+                time.sleep(5)
+        self.logger.info('Sending updates...')
         if self.mode == 'MRT_FILE':
             self._send_update_from_mrt_file(self.mrt_file)
         else:
@@ -195,9 +205,6 @@ class BGPUpdateGenerator(object):
         return self.nexthop_range[idx]
 
     def _send_rand_update(self):
-        if self.bgpagent is None:
-            return
-        peers = self.bgpagent.get_peers()
         updates = {}
         update = {}
         attr = {}
@@ -224,7 +231,7 @@ class BGPUpdateGenerator(object):
                     nlri = self._gen_prefixes(self.max_prefix_per_update)
                     update['nlri'] = nlri
                     announced_prefixes.append(nlri)
-            for peer_ip in peers:
+            for peer_ip in self._peers:
                 update['attr']['next-hop'] = self._get_rand_nexthop()
                 updates[peer_ip] = update
             self.bgpagent.send_update(updates)
@@ -234,8 +241,6 @@ class BGPUpdateGenerator(object):
         self.count = count
 
     def _send_update_from_mrt_file(self, filename):
-        if self.bgpagent is None:
-            return
         bgpdump = BGPDump(filename)
         mrt_m = bgp_h = bgp_m = None
         delay = 0.0
@@ -299,7 +304,7 @@ class BGPUpdateGenerator(object):
                     update['nlri'] = nlri
                     update['withdraw'] = withdraw
                     updates = {}
-                    for peer_ip in self.bgpagent.get_peers():
+                    for peer_ip in self._peers:
                         updates[peer_ip] = update
                     self.bgpagent.send_update(updates)
                     if prev_ts == 0:
@@ -307,7 +312,7 @@ class BGPUpdateGenerator(object):
                     else:
                         delay = mrt_h.ts - prev_ts
                     prev_ts = mrt_h.ts
-                    time.sleep(delay + 0.01)
+                    time.sleep(delay)
             except Exception as e:
                 traceback.print_exc()
                 time.sleep(5)
