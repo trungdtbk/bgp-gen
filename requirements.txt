@@ -1,1 +1,3 @@
-dpkt>==1.6
+dpkt
+ipaddr
+oslo.config

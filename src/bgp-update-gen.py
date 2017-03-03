@@ -118,7 +118,7 @@ class BGPUpdateGenerator(object):
         self.mode = os.getenv('BGPGEN_MODE', 'RAND').upper()
         self.gen_type = os.getenv('BGPGEN_TYPE', 'MIXED').upper()
         self.update_count = int(os.getenv('BGPGEN_COUNT', 0))
-        self.update_per_sec = int(os.getenv('BGPGEN_RATE', 1))
+        self.update_per_sec = int(os.getenv('BGPGEN_RATE', 0))
         self.max_prefix_per_update = int(os.getenv('BGPGEN_MAX_PREFIX', 4))
         self.bgp_agent = os.getenv('BGPGEN_AGENT', 'test').upper()
         self.srv_addr = os.getenv('BGPGEN_SRV_ADDR', '127.0.0.1:8080')
@@ -138,7 +138,7 @@ class BGPUpdateGenerator(object):
             ip_min = ipaddr.IPAddress(ip_min)
             ip_max = ipaddr.IPAddress(ip_max)
             self.nexthop_range = []
-            for ip in range(ip_min, ip_max):
+            for ip in (ip_min, ip_max):
                 self.nexthop_range.append(str(ipaddr.IPAddress(ip)))
         except:
             self.nexthop_range = None
@@ -215,6 +215,8 @@ class BGPUpdateGenerator(object):
         update['attr'] = attr
         count = 0
         announced_prefixes = []
+        if self.update_per_sec == 0:
+            self.update_per_sec = 1
         while count < self.update_count or self.update_count == 0:
             update['nlri'] = []
             update['withdraw'] = []
@@ -312,7 +314,10 @@ class BGPUpdateGenerator(object):
                     else:
                         delay = mrt_h.ts - prev_ts
                     prev_ts = mrt_h.ts
-                    time.sleep(delay)
+                    if self.update_per_sec:
+                        time.sleep(1/self.update_per_sec)
+                    else:
+                        time.sleep(delay)
             except Exception as e:
                 traceback.print_exc()
                 time.sleep(5)
@@ -322,9 +327,8 @@ CONF = cfg.CONF
 CONF.register_cli_opt(
         cfg.StrOpt('log', help='path to log file (default: no logging)'))
 CONF.register_cli_opt(
-        cfg.StrOpt('mode', help='generate mode: MRT_FILE or RAND (default)'))
-CONF.register_cli_opt(
-        cfg.StrOpt('mrt_file', help='path to mrt_file'))
+        cfg.StrOpt('mrt_file',
+            help='path to mrt_file. If not specified random updates are generated'))
 CONF.register_cli_opt(
         cfg.StrOpt('agent', help='supported ExaBGP, YaBGP and Console (default)'))
 CONF.register_cli_opt(
@@ -345,8 +349,6 @@ CONF.register_cli_opt(
 
 if __name__ == '__main__':
     CONF(args=sys.argv[1:])
-    if CONF.mode:
-        os.environ['BGPGEN_MODE'] = CONF.mode
     if CONF.mrt_file:
         os.environ['BGPGEN_MRT_FILE'] = CONF.mrt_file
         os.environ['BGPGEN_MODE'] = 'MRT_FILE'
