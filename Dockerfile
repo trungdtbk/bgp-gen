@@ -38,14 +38,14 @@ RUN mkdir /src/
 WORKDIR /src/
 RUN wget https://research.wand.net.nz/software/wandio/wandio-1.0.4.tar.gz
 RUN tar xzf wandio-1.0.4.tar.gz
-RUN cd wandio-1.0.4
+WORKDIR wandio-1.0.4
 RUN ./configure
 RUN make && make install
 
-RUN cd /src/
+WORKDIR /src/
 RUN wget https://bgpstream.caida.org/bundles/caidabgpstreamwebhomepage/dists/bgpstream-1.1.0.tar.gz
 RUN tar xzf bgpstream-1.1.0.tar.gz
-RUN cd bgpstream-1.1.0
+WORKDIR bgpstream-1.1.0
 RUN ldconfig && ./configure && make && make install
 RUN pip install pybgpstream
 RUN ldconfig
