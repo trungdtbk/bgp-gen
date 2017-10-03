@@ -45,7 +45,7 @@ class BGPStreamGenerator(object):
         fh = logging.FileHandler(self.logfile)
         fh.setLevel(logging.INFO)
         self.logger.addHandler(fh)
-        self.config_file = '/etc/bgp_gen/ben_gen.yaml'
+        self.config_file = '/etc/bgp_gen/bgp_gen.yaml'
         if len(sys.argv) == 2:
             self.config_file = sys.argv[1]
         elif 'BGP_GEN_CONFIG' in os.environ:
