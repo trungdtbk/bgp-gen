@@ -35,7 +35,9 @@ class BGPStreamGenerator(object):
         'delay': 0.1,
     }
 
+
     def __init__(self, logname):
+        self.logfile = '/var/log/bgp_gen/bgp_gen.log'
         if 'BGP_GEN_LOG' in os.environ:
             self.logfile = os.environ['BGP_GEN_LOG']
         self.logger = logging.getLogger(logname + 'bgp_gen')
@@ -114,7 +116,8 @@ class BGPStreamGenerator(object):
                             prefix = elem.fields['prefix']
                             statement = 'withdraw route %s' % prefix
                     if statement:
-                        print(statement)
+                        sys.stdout.write("%s\n" % statement)
+                        sys.stdout.flush()
                     elem = rec.get_next_elem()
             time.sleep(self.delay + now - prev)
             prev = now
