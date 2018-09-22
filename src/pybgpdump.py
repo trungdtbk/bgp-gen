@@ -1,7 +1,8 @@
-#!/usr/bin/env python
-
+"""Parse BGP updates from MRT file (uncompressed or compressed in bz2 or gz format.
+"""
 import gzip, bz2
-import dpkt
+import dpkt, struct
+from socket import inet_ntoa as inet_ntoa
 
 BZ2_MAGIC = '\x42\x5a\x68'
 GZIP_MAGIC = dpkt.gzip.GZIP_MAGIC
@@ -10,11 +11,11 @@ SUPPORTED_AFIS = ( dpkt.mrt.AFI_IPv4, )
 SUPPORTED_TYPES = ( dpkt.bgp.UPDATE, )
 
 class BGPDump:
+    """A BGPDump object wraps around a MRT file. next() method can be used to get next updates from the file."""
     def __init__(self, filename):
         f = file(filename, 'rb')
         hdr = f.read(max(len(BZ2_MAGIC), len(GZIP_MAGIC)))
         f.close()
-
         if filename.endswith('.bz2') and hdr.startswith(BZ2_MAGIC):
             self.fobj = bz2.BZ2File
         elif filename.endswith('.gz') and hdr.startswith(GZIP_MAGIC):
@@ -68,4 +69,37 @@ class BGPDump:
                 break
             except:
                 pass
-        return (mrt_h, bgp_h, bgp_m)
+        if mrt_h is None or bgp_h is None or bgp_m is None:
+            StopIteration
+        if bgp_m.type != dpkt.bgp.UPDATE:
+            return self.next()
+        nlri = []
+        for p in bgp_m.update.announced:
+            nlri.append("%s/%d" % (inet_ntoa(p.prefix), p.len))
+        withdraw = []
+        for p in bgp_m.update.withdrawn:
+            withdraw.append("%s/%d" % (inet_ntoa(p.prefix), p.len))
+        attr = {}
+        for at in bgp_m.update.attributes:
+            if at.type == dpkt.bgp.NEXT_HOP:
+                attr['nexthop'] = inet_ntoa(
+                        struct.pack(b'I', at.next_hop.ip))
+            elif at.type == dpkt.bgp.ORIGIN:
+                attr['origin'] = at.origin.type
+            elif at.type == dpkt.bgp.AS_PATH:
+                attr['as_path'] = at.as_path.segments
+            elif at.type == dpkt.bgp.MULTI_EXIT_DISC:
+                attr['med'] = at.multi_exit_disc.value
+            elif at.type == dpkt.bgp.LOCAL_PREF:
+                attr['local_pref'] = at.local_pref.value
+            elif at.type == dpkt.bgp.COMMUNITIES:
+                attr['community'] = at.communities.list
+            elif at.type == dpkt.bgp.MP_REACH_NLRI:
+                #TODO: Handle message with mp reach
+                mp_reach = at.mp_reach_nlri
+                afi_safi = [mp_reach.afi, mp_reach.safi]
+                nexthop = []
+            elif at.type == dpkt.bgp.MP_UNREACH_NLRI:
+                #TODO: handle mp unreach message
+                pass
+        return (mrt_h.ts, attr, nlri, withdraw)
