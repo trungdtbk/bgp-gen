@@ -9,19 +9,18 @@ GZIP_MAGIC = dpkt.gzip.GZIP_MAGIC
 MRT_HEADER_LEN = dpkt.mrt.MRTHeader.__hdr_len__
 SUPPORTED_AFIS = ( dpkt.mrt.AFI_IPv4, )
 SUPPORTED_TYPES = ( dpkt.bgp.UPDATE, )
-
+BGP_MARKER = '\xff' * 16
 class BGPDump:
     """A BGPDump object wraps around a MRT file. next() method can be used to get next updates from the file."""
     def __init__(self, filename):
-        f = file(filename, 'rb')
-        hdr = f.read(max(len(BZ2_MAGIC), len(GZIP_MAGIC)))
-        f.close()
-        if filename.endswith('.bz2') and hdr.startswith(BZ2_MAGIC):
-            self.fobj = bz2.BZ2File
-        elif filename.endswith('.gz') and hdr.startswith(GZIP_MAGIC):
-            self.fobj = gzip.GzipFile
-        else:
-            self.fobj = file
+        with open(filename, 'rb') as f:
+            hdr = f.read(max(len(BZ2_MAGIC), len(GZIP_MAGIC)))
+            if filename.endswith('.bz2') and hdr.startswith(BZ2_MAGIC.encode('utf-8')):
+                self.fobj = bz2.BZ2File
+            elif filename.endswith('.gz') and hdr.startswith(GZIP_MAGIC.encode('utf-8')):
+                self.fobj = gzip.GzipFile
+            else:
+                self.fobj = open
         self.open(filename)
 
     def open(self, filename):
@@ -64,14 +63,13 @@ class BGPDump:
                 bgp_m = dpkt.bgp.BGP(bgp_h.data)
                 if bgp_m.type not in SUPPORTED_TYPES:
                     continue
-                if bgp_m.marker != '\xff' * 16:
-                    continue
                 break
             except:
                 pass
         if mrt_h is None or bgp_h is None or bgp_m is None:
             StopIteration
         if bgp_m.type != dpkt.bgp.UPDATE:
+            print(bgp_m.type, 'not an update')
             return self.next()
         nlri = []
         for p in bgp_m.update.announced:
