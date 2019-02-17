@@ -1,3 +1,2 @@
 dpkt>=1.6
-ipaddr
 oslo.config
