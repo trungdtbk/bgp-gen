@@ -12,14 +12,15 @@ from oslo_config import cfg
 
 
 class ConsoleAgent(object):
+    """Print BGP messages to stdout."""
     def start(self, *args):
         return
 
     def stop(self):
         return
 
-    def wait(self, timeout=120):
-        return
+    def connected(self, timeout=120):
+        return True
 
     def send_update(self, update):
         print(update)
@@ -33,43 +34,50 @@ class ExaBGPAgent(object):
 
     def start(self, peers, local_ip, local_as):
         """Start ExaBGP in subprocess."""
-        config = """
+        CONFIG = """
 process announce {
-    run nc -l -p 5555;
+    run nc -l -U %s;
     encoder json;
 }
+        """
+        PEER_CONFIG = """
 neighbor %s {
     passive;
     connect %s;
     peer-as %s;
     local-address %s;
     local-as %s;
-    hold-time 180;
-    router-id 1.2.3.4;
+    router-id 192.168.192.192;
     api {
         processes [announce];
     }
 }
         """
         _, config_file = tempfile.mkstemp()
+        _, sock_path = tempfile.mkstemp()
+        _, logfile = tempfile.mkstemp()
+        print('exabgp log is located at: %s' % logfile)
         self.config_file = config_file
+        self.logfile = logfile
         with open(config_file, 'w') as f:
+            config = CONFIG % sock_path
+            f.write('%s\n' % config)
             for peer in peers:
                 peer_ip, peer_port, peer_as = peer
-            peer_config = config % (peer_ip, peer_port, peer_as, local_ip, local_as)
+            peer_config = PEER_CONFIG % (peer_ip, peer_port, peer_as, local_ip, local_as)
             f.write('%s\n' % peer_config)
         self.exabgp = subprocess.Popen(
                 ['env',
                  'exabgp.daemon.daemonize=false',
                  'exabgp.log.level=DEBUG',
-                 'exabgp.log.all=false',
-                 #'exabgp.log.destination=/home/trungth/bgpgen.log',
+                 'exabgp.log.all=true',
+                 'exabgp.log.destination=%s' % self.logfile,
                  'exabgp', '%s' % config_file],
                 stdin=subprocess.PIPE, stdout=subprocess.PIPE)
-        self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        self.socket = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
         for _ in range(10):
             try:
-                self.socket.connect(('127.0.0.1', 5555))
+                self.socket.connect(sock_path)
                 break
             except:
                 time.sleep(1)
@@ -84,18 +92,10 @@ neighbor %s {
         if self.config_file:
             os.remove(self.config_file)
 
-    def wait(self, timeout=120):
+    def connected(self):
         """wait for connection to BGP peers."""
-        print('waiting for connection to BGP peers...')
-        peer = None
-        for _ in range(timeout):
-            line = self.exabgp.stdout.readline()
-            if 'connected' in line:
-                peer = line
-                break
-        if peer:
-            print('peer %s is connected' % peer)
-        return peer
+        time.sleep(10)
+        return True
 
     def _to_exabgp_format(self, update):
         exabgp_attr_name_conversion = {
@@ -136,7 +136,7 @@ neighbor %s {
         """send the update to client process in ExaBGP."""
         if self.socket:
             for statement in self._to_exabgp_format(update):
-                self.socket.sendall(statement + '\n')
+                self.socket.sendall(statement + '\r\n')
 
 
 class YaBGPAgent(object):
@@ -166,13 +166,13 @@ class YaBGPAgent(object):
         data = self.session.get('http://localhost/v1/' + path, auth=HTTPBasicAuth('admin', 'admin'))
         return data.json()
 
-    def wait(self, timeout=120):
-        for _ in range(timeout):
+    def connected(self):
+        for _ in range(60):
             data = self._get('peers')
             for peer in data.get('peers', []):
                 if peer['fsm'] == 'ESTABLISHED':
                     self.peer = peer
-                    return peer
+                    return True
         return
 
     def _build_yabgp_msgs(self, update):
@@ -230,8 +230,9 @@ class BgpUpdateGenerator(object):
         """Start sending updates."""
         try:
             self.agent.start(self.config['peers'], self.config['local_ip'], self.config['local_as'])
-            # wait for peer to connect
-            self.agent.wait()
+            if not self.agent.connected():
+                print('no BGP router is connected')
+                return
             time.sleep(1)
             if self.config['mrt']:
                 self._send_update_from_source(source_type='mrt_file', filename=self.config['mrt'])
@@ -239,6 +240,7 @@ class BgpUpdateGenerator(object):
                 self._send_update_from_source(source_type='live', collector=self.config['live'])
             else:
                 self._send_random_update()
+            self.agent.stop()
         except (KeyboardInterrupt, Exception):
             self.agent.stop()
             traceback.print_exc()
@@ -273,7 +275,8 @@ class BgpUpdateGenerator(object):
             else:
                 return seq
         sent = 0
-        self.update_per_sec = self.config['rate'] or 1
+        update_per_sec = self.config['rate'] or 1
+        update_per_sec = float(update_per_sec)
         announced_prefixes = set()
         rate = self.config['rate']
         while sent < self.config['count'] or self.config['count'] == 0:
@@ -292,7 +295,7 @@ class BgpUpdateGenerator(object):
                 update['nlri'] = random_prefixes(self.config['max_prefix'])
                 announced_prefixes.update(update['nlri'])
             elif self.config['update_type'] == 'withdraw':
-                update['withdraw'] = sample(announced_prefixes, self.config['max_prefix'])
+                update['withdraw'] = random_prefixes(self.config['max_prefix'])
             else:
                 if random.getrandbits(1):
                     update['withdraw'] = sample(announced_prefixes, self.config['max_prefix'])
@@ -301,12 +304,12 @@ class BgpUpdateGenerator(object):
                     announced_prefixes.update(update['nlri'])
             self.agent.send_update(update)
             sent += 1
-            time.sleep(1/self.update_per_sec)
+            time.sleep(1/update_per_sec)
 
     def _send_update_from_source(self, source_type, **kwargs):
         stream = None
         if source_type == 'mrt_file':
-            from pybgpdump import BGPDump
+            from .pybgpdump import BGPDump
             stream = BGPDump(kwargs['filename'])
         elif source_type == 'live':
             from bgpstream import BGPStreamReader
@@ -357,18 +360,18 @@ def setup_cli_opts():
                      ('exabgp', 'https://github.com/Exa-Networks/exabgp'),
                      ('console', 'Print to screen')],
             help='Use YaBGP or ExaBGP for BGP peering or simply print to screen'),
-        cfg.StrOpt('count', short='c',
+        cfg.IntOpt('count', short='c',
             help='Number of updates to send. Use 0 for no limit (default)'),
-        cfg.StrOpt('rate', short='r',
+        cfg.FloatOpt('rate', short='r',
             help='Number of updates per sec, if not specified, based on timestamp in MRT file, or 1 for random updates'),
-        cfg.StrOpt('max_prefix', short='m',
+        cfg.IntOpt('max_prefix', short='m',
             help='Max number of prefixes per updates. Default=1. The actual number is randomly between 1 to the max'),
         cfg.StrOpt('update_type', short='t', choices=['announce', 'withdraw', 'mixed'],
             help='Type of updates: announce, withdraw or mixed (default)'),
         cfg.MultiStrOpt('nexthop', short='nh',
             help='A nexthop(s) to use for announcements. Default=IP address used to establish the peering'),
-        cfg.IntOpt('local_as', help='Local ASN'),
-        cfg.IntOpt('local_ip', help='Local IP'),
+        cfg.IntOpt('local_as', help='Local ASN, default=65000'),
+        cfg.StrOpt('local_ip', help='Local IP, default=127.0.0.1'),
     ]
     CONF.register_cli_opts(cli_opts)
     return CONF
@@ -415,7 +418,7 @@ CHECKS = {
         'nexthop': check_nexthop_format
         }
 
-if __name__ == '__main__':
+def main():
     conf = setup_cli_opts()
     conf(args=sys.argv[1:])
 
@@ -425,5 +428,9 @@ if __name__ == '__main__':
         if param in CHECKS:
             value = CHECKS[param](value)
         config[param] = value
+    print(config)
     bgpgen = BgpUpdateGenerator(config)
     bgpgen.run()
+
+if __name__ == '__main__':
+    main()
