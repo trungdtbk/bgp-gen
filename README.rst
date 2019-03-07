@@ -44,6 +44,7 @@ How to run
 ==========
 
 1. Install and start YaBGP on any PC
+------------------------------------
 - from pip: pip install yabgp
 - from source: git clone https://github.com/trungdtbk/yabgp
 
@@ -52,6 +53,7 @@ How to run
 [--bgp-remote_port <PORT>] --rest-bind_host 0.0.0.0 --rest-bind_port 8080
 
 2. Run BGP generator
+--------------------
 - git clone https://github.com/trungdtbk/bgp-update-gen
 - cd bgp-update-gen/src
 - ./bgp-update-gen
